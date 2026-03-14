@@ -19,8 +19,8 @@ A full-stack mobile application that lets you manage multiple LLM API keys, crea
 
 | Layer | Technology |
 |---|---|
-| Mobile | React Native + Expo (SDK 51) |
-| Navigation | Expo Router v3 |
+| Mobile | React Native + Expo (SDK 54) |
+| Navigation | Expo Router v6 |
 | State | Zustand with AsyncStorage persistence |
 | Secure storage | expo-secure-store |
 | UI components | Custom + @expo/vector-icons |
@@ -89,7 +89,7 @@ omnillm/
 
 - Node.js 18+
 - npm or yarn
-- iOS Simulator / Android Emulator **or** the [Expo Go](https://expo.dev/client) app on a physical device
+- iOS Simulator / Android Emulator **or** the [Expo Go](https://expo.dev/client) app on a physical device (**version 54** is required to match the SDK)
 
 ---
 
