@@ -29,7 +29,6 @@ export interface SessionLLM {
   displayName: string;
   provider: LLMProvider;
   model: string;
-  apiKey: string;
   role: string;
   systemPrompt: string;
   /** Accent colour for this LLM in the UI */

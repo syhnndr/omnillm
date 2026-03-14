@@ -9,10 +9,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useStore } from '../../store';
+import { useStore, retrieveApiKey } from '../../store';
 import { ChatMessage, ChatSession, BackendChatRequest, BackendChatResponse } from '../../types';
 import ChatMessageBubble from '../../components/ChatMessage';
 
@@ -97,20 +98,35 @@ export default function SessionScreen() {
 
     // Build request
     const history = buildHistory(session);
-    const requestBody: BackendChatRequest = {
-      message: text,
-      history,
-      llms: session.llms.map((l) => ({
-        provider: l.provider,
-        model: l.model,
-        apiKey: l.apiKey,
-        systemPrompt: l.systemPrompt,
-        role: l.role,
-        displayName: l.displayName,
-      })),
-    };
 
     try {
+      // Fetch API keys from SecureStore — inside try so missing keys are caught
+      const apiKeys = await Promise.all(
+        session.llms.map(async (llm) => {
+          const key = await retrieveApiKey(llm.savedLLMId);
+          if (!key) {
+            throw new Error(`API key for ${llm.displayName} is missing. Please add it in settings.`);
+          }
+          return { savedLLMId: llm.savedLLMId, apiKey: key };
+        })
+      );
+
+      const requestBody: BackendChatRequest = {
+        message: text,
+        history,
+        llms: session.llms.map((l) => {
+          const keyEntry = apiKeys.find((k) => k.savedLLMId === l.savedLLMId)!;
+          return {
+            provider: l.provider,
+            model: l.model,
+            apiKey: keyEntry.apiKey,
+            systemPrompt: l.systemPrompt,
+            role: l.role,
+            displayName: l.displayName,
+          };
+        }),
+      };
+
       const res = await fetch(`${backendUrl}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -136,14 +152,16 @@ export default function SessionScreen() {
       });
     } catch (err) {
       // Mark all loading messages as errored
+      const errorMessage = err instanceof Error ? err.message : 'Network error';
       session.llms.forEach((llm) => {
         const msgId = loadingIds[llm.savedLLMId];
         updateMessage(id!, msgId, {
-          content: `Error: ${err instanceof Error ? err.message : 'Network error'}`,
+          content: `Error: ${errorMessage}`,
           loading: false,
-          error: err instanceof Error ? err.message : 'Network error',
+          error: errorMessage,
         });
       });
+      Alert.alert('Error', errorMessage);
     } finally {
       setSending(false);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 200);
