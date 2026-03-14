@@ -70,6 +70,7 @@ export default function NewSessionScreen() {
           displayName: saved.displayName,
           provider: saved.provider,
           model: saved.model,
+          ...(saved.baseUrl ? { baseUrl: saved.baseUrl } : {}),
           role: config.role,
           systemPrompt: config.systemPrompt,
           color: LLM_ACCENT_COLORS[index % LLM_ACCENT_COLORS.length],

@@ -9,7 +9,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -96,35 +95,33 @@ export default function SessionScreen() {
     // Scroll to bottom
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
 
-    // Build request
+    // Build request — fetch API keys from SecureStore right before sending
     const history = buildHistory(session);
 
     try {
       // Fetch API keys from SecureStore — inside try so missing keys are caught
-      const apiKeys = await Promise.all(
-        session.llms.map(async (llm) => {
-          const key = await retrieveApiKey(llm.savedLLMId);
-          if (!key) {
-            throw new Error(`API key for ${llm.displayName} is missing. Please add it in settings.`);
+      const llmConfigs = await Promise.all(
+        session.llms.map(async (l) => {
+          const apiKey = await retrieveApiKey(l.savedLLMId);
+          if (!apiKey) {
+            throw new Error(`No API key found for "${l.displayName}". Please add it in Settings.`);
           }
-          return { savedLLMId: llm.savedLLMId, apiKey: key };
-        })
-      );
-
-      const requestBody: BackendChatRequest = {
-        message: text,
-        history,
-        llms: session.llms.map((l) => {
-          const keyEntry = apiKeys.find((k) => k.savedLLMId === l.savedLLMId)!;
           return {
+            savedLLMId: l.savedLLMId,
             provider: l.provider,
             model: l.model,
-            apiKey: keyEntry.apiKey,
+            apiKey,
             systemPrompt: l.systemPrompt,
             role: l.role,
             displayName: l.displayName,
+            ...(l.baseUrl ? { baseUrl: l.baseUrl } : {}),
           };
-        }),
+        })
+      );
+      const requestBody: BackendChatRequest = {
+        message: text,
+        history,
+        llms: llmConfigs,
       };
 
       const res = await fetch(`${backendUrl}/chat`, {
@@ -141,9 +138,8 @@ export default function SessionScreen() {
 
       // Update loading placeholders with actual responses
       data.responses.forEach((resp) => {
-        const llm = session.llms.find((l) => l.displayName === resp.displayName);
-        if (!llm) return;
-        const msgId = loadingIds[llm.savedLLMId];
+        const msgId = loadingIds[resp.savedLLMId];
+        if (!msgId) return;
         updateMessage(id!, msgId, {
           content: resp.error ? `Error: ${resp.error}` : resp.content,
           loading: false,
@@ -152,16 +148,14 @@ export default function SessionScreen() {
       });
     } catch (err) {
       // Mark all loading messages as errored
-      const errorMessage = err instanceof Error ? err.message : 'Network error';
       session.llms.forEach((llm) => {
         const msgId = loadingIds[llm.savedLLMId];
         updateMessage(id!, msgId, {
-          content: `Error: ${errorMessage}`,
+          content: `Error: ${err instanceof Error ? err.message : 'Network error'}`,
           loading: false,
-          error: errorMessage,
+          error: err instanceof Error ? err.message : 'Network error',
         });
       });
-      Alert.alert('Error', errorMessage);
     } finally {
       setSending(false);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 200);

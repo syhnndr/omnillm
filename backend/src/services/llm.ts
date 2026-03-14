@@ -4,6 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { LLMConfig, ChatMessage } from '../routes/chat';
 
 export interface LLMResponse {
+  savedLLMId: string;
   displayName: string;
   role: string;
   content: string;
@@ -19,7 +20,10 @@ async function callOpenAI(
   message: string,
   history: ChatMessage[]
 ): Promise<string> {
-  const client = new OpenAI({ apiKey: config.apiKey });
+  const client = new OpenAI({
+    apiKey: config.apiKey,
+    baseURL: config.baseUrl || undefined,
+  });
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
@@ -213,6 +217,7 @@ async function callSingleLLM(
     }
 
     return {
+      savedLLMId: config.savedLLMId,
       displayName: config.displayName,
       role: config.role,
       content,
@@ -221,6 +226,7 @@ async function callSingleLLM(
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
     return {
+      savedLLMId: config.savedLLMId,
       displayName: config.displayName,
       role: config.role,
       content: '',
@@ -250,6 +256,7 @@ export async function callAllLLMs(
     // Should not normally reach here because callSingleLLM catches all errors,
     // but handle it defensively.
     return {
+      savedLLMId: llms[index].savedLLMId,
       displayName: llms[index].displayName,
       role: llms[index].role,
       content: '',

@@ -30,6 +30,7 @@ export default function SettingsScreen() {
     provider: LLMProvider;
     model: string;
     apiKey: string;
+    baseUrl?: string;
   }) {
     if (editTarget) {
       // Update existing — only overwrite the API key if a new one was provided
@@ -40,12 +41,13 @@ export default function SettingsScreen() {
         displayName: data.displayName,
         provider: data.provider,
         model: data.model,
+        baseUrl: data.baseUrl,
       });
     } else {
       // Add new
       const id = `llm_${Date.now()}`;
       await storeApiKey(id, data.apiKey);
-      addLLM({ id, displayName: data.displayName, provider: data.provider, model: data.model, apiKey: '' });
+      addLLM({ id, displayName: data.displayName, provider: data.provider, model: data.model, baseUrl: data.baseUrl });
     }
     setShowForm(false);
     setEditTarget(null);

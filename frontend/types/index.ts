@@ -10,13 +10,14 @@ export type LLMProvider =
   | 'cohere'
   | 'custom';
 
-/** A saved API key / LLM configuration stored on device */
+/** A saved LLM configuration stored on device. API keys are stored separately in SecureStore and retrieved at runtime. */
 export interface SavedLLM {
   id: string;
   displayName: string;
   provider: LLMProvider;
   model: string;
-  apiKey: string;
+  /** Only used for custom OpenAI-compatible providers */
+  baseUrl?: string;
 }
 
 // ─────────────────────────────────────────────
@@ -29,6 +30,8 @@ export interface SessionLLM {
   displayName: string;
   provider: LLMProvider;
   model: string;
+  /** Only used for custom OpenAI-compatible providers */
+  baseUrl?: string;
   role: string;
   systemPrompt: string;
   /** Accent colour for this LLM in the UI */
@@ -69,12 +72,15 @@ export interface ChatSession {
 // ─────────────────────────────────────────────
 
 export interface BackendLLMConfig {
+  savedLLMId: string;
   provider: LLMProvider;
   model: string;
   apiKey: string;
   systemPrompt: string;
   role: string;
   displayName: string;
+  /** Only used for custom OpenAI-compatible providers */
+  baseUrl?: string;
 }
 
 export interface BackendChatRequest {
@@ -84,6 +90,7 @@ export interface BackendChatRequest {
 }
 
 export interface BackendLLMResponse {
+  savedLLMId: string;
   displayName: string;
   role: string;
   content: string;
