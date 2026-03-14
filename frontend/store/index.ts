@@ -140,8 +140,13 @@ export const useStore = create<AppState>()(
     {
       name: 'omnillm-storage',
       storage: createJSONStorage(() => AsyncStorage),
-      // Don't persist API keys in AsyncStorage — they live in SecureStore.
-      // We only persist metadata (display name, provider, model) and sessions.
+      // Explicitly list persisted fields to prevent API keys or future sensitive
+      // fields from reaching AsyncStorage. Keys are stored exclusively in SecureStore.
+      partialize: (state) => ({
+        savedLLMs: state.savedLLMs,
+        sessions: state.sessions,
+        backendUrl: state.backendUrl,
+      }),
     }
   )
 );

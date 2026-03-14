@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useStore, retrieveApiKey } from '../store';
+import { useStore } from '../store';
 import { SessionLLM, SavedLLM } from '../types';
 import LLMCard from '../components/LLMCard';
 import { LLM_ACCENT_COLORS } from '../constants/providers';
@@ -52,7 +52,7 @@ export default function NewSessionScreen() {
     }));
   }
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!sessionName.trim()) {
       Alert.alert('Error', 'Please enter a session name');
       return;
@@ -62,23 +62,20 @@ export default function NewSessionScreen() {
       return;
     }
 
-    const sessionLLMs: SessionLLM[] = await Promise.all(
-      selectedIds.map(async (id, index) => {
+    const sessionLLMs: SessionLLM[] = selectedIds.map((id, index) => {
         const saved = savedLLMs.find((l) => l.id === id)!;
-        const apiKey = await retrieveApiKey(id);
         const config = llmConfigs[id] ?? { role: '', systemPrompt: '' };
         return {
           savedLLMId: id,
           displayName: saved.displayName,
           provider: saved.provider,
           model: saved.model,
-          apiKey,
+          ...(saved.baseUrl ? { baseUrl: saved.baseUrl } : {}),
           role: config.role,
           systemPrompt: config.systemPrompt,
           color: LLM_ACCENT_COLORS[index % LLM_ACCENT_COLORS.length],
         };
-      })
-    );
+      });
 
     const session = createSession(sessionName.trim(), sessionLLMs);
     router.replace(`/session/${session.id}`);

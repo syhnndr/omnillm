@@ -10,6 +10,9 @@ export interface LLMConfig {
   systemPrompt: string;
   role: string;
   displayName: string;
+  savedLLMId: string;
+  /** Only used for custom OpenAI-compatible providers */
+  baseUrl?: string;
 }
 
 export interface ChatMessage {

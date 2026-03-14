@@ -33,6 +33,7 @@ interface LLMFormProps {
     provider: LLMProvider;
     model: string;
     apiKey: string;
+    baseUrl?: string;
   }) => void;
   onCancel: () => void;
 }
@@ -79,13 +80,14 @@ function LLMAddForm({ editTarget, onSave, onCancel }: LLMFormProps) {
   const [provider, setProvider] = useState<LLMProvider>(editTarget?.provider ?? 'openai');
   const [model, setModel] = useState(editTarget?.model ?? '');
   const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState(editTarget?.baseUrl ?? '');
   const [showKey, setShowKey] = useState(false);
   const [showProviderPicker, setShowProviderPicker] = useState(false);
 
   const selectedProvider = getProviderInfo(provider);
 
   function handleSave() {
-    onSave({ displayName: displayName.trim(), provider, model: model.trim(), apiKey: apiKey.trim() });
+    onSave({ displayName: displayName.trim(), provider, model: model.trim(), apiKey: apiKey.trim(), baseUrl: baseUrl.trim() || undefined });
   }
 
   return (
@@ -174,6 +176,23 @@ function LLMAddForm({ editTarget, onSave, onCancel }: LLMFormProps) {
           <Ionicons name={showKey ? 'eye-off-outline' : 'eye-outline'} size={20} color="#a3a3a3" />
         </TouchableOpacity>
       </View>
+
+      {/* Base URL — shown only for custom OpenAI-compatible providers */}
+      {provider === 'custom' && (
+        <>
+          <Text style={styles.label}>Base URL</Text>
+          <TextInput
+            style={styles.input}
+            value={baseUrl}
+            onChangeText={setBaseUrl}
+            placeholder="https://your-endpoint/v1"
+            placeholderTextColor="#525252"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+        </>
+      )}
 
       {/* Actions */}
       <View style={styles.actions}>

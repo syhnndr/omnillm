@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useStore } from '../../store';
+import { useStore, retrieveApiKey } from '../../store';
 import { ChatMessage, ChatSession, BackendChatRequest, BackendChatResponse } from '../../types';
 import ChatMessageBubble from '../../components/ChatMessage';
 
@@ -95,19 +95,30 @@ export default function SessionScreen() {
     // Scroll to bottom
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
 
-    // Build request
+    // Build request — fetch API keys from SecureStore right before sending
     const history = buildHistory(session);
+    const llmConfigs = await Promise.all(
+      session.llms.map(async (l) => {
+        const apiKey = await retrieveApiKey(l.savedLLMId);
+        if (!apiKey) {
+          throw new Error(`No API key found for "${l.displayName}". Please add it in Settings.`);
+        }
+        return {
+          savedLLMId: l.savedLLMId,
+          provider: l.provider,
+          model: l.model,
+          apiKey,
+          systemPrompt: l.systemPrompt,
+          role: l.role,
+          displayName: l.displayName,
+          ...(l.baseUrl ? { baseUrl: l.baseUrl } : {}),
+        };
+      })
+    );
     const requestBody: BackendChatRequest = {
       message: text,
       history,
-      llms: session.llms.map((l) => ({
-        provider: l.provider,
-        model: l.model,
-        apiKey: l.apiKey,
-        systemPrompt: l.systemPrompt,
-        role: l.role,
-        displayName: l.displayName,
-      })),
+      llms: llmConfigs,
     };
 
     try {
@@ -125,9 +136,8 @@ export default function SessionScreen() {
 
       // Update loading placeholders with actual responses
       data.responses.forEach((resp) => {
-        const llm = session.llms.find((l) => l.displayName === resp.displayName);
-        if (!llm) return;
-        const msgId = loadingIds[llm.savedLLMId];
+        const msgId = loadingIds[resp.savedLLMId];
+        if (!msgId) return;
         updateMessage(id!, msgId, {
           content: resp.error ? `Error: ${resp.error}` : resp.content,
           loading: false,
