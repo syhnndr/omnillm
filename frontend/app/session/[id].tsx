@@ -97,31 +97,33 @@ export default function SessionScreen() {
 
     // Build request — fetch API keys from SecureStore right before sending
     const history = buildHistory(session);
-    const llmConfigs = await Promise.all(
-      session.llms.map(async (l) => {
-        const apiKey = await retrieveApiKey(l.savedLLMId);
-        if (!apiKey) {
-          throw new Error(`No API key found for "${l.displayName}". Please add it in Settings.`);
-        }
-        return {
-          savedLLMId: l.savedLLMId,
-          provider: l.provider,
-          model: l.model,
-          apiKey,
-          systemPrompt: l.systemPrompt,
-          role: l.role,
-          displayName: l.displayName,
-          ...(l.baseUrl ? { baseUrl: l.baseUrl } : {}),
-        };
-      })
-    );
-    const requestBody: BackendChatRequest = {
-      message: text,
-      history,
-      llms: llmConfigs,
-    };
 
     try {
+      // Fetch API keys from SecureStore — inside try so missing keys are caught
+      const llmConfigs = await Promise.all(
+        session.llms.map(async (l) => {
+          const apiKey = await retrieveApiKey(l.savedLLMId);
+          if (!apiKey) {
+            throw new Error(`No API key found for "${l.displayName}". Please add it in Settings.`);
+          }
+          return {
+            savedLLMId: l.savedLLMId,
+            provider: l.provider,
+            model: l.model,
+            apiKey,
+            systemPrompt: l.systemPrompt,
+            role: l.role,
+            displayName: l.displayName,
+            ...(l.baseUrl ? { baseUrl: l.baseUrl } : {}),
+          };
+        })
+      );
+      const requestBody: BackendChatRequest = {
+        message: text,
+        history,
+        llms: llmConfigs,
+      };
+
       const res = await fetch(`${backendUrl}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
