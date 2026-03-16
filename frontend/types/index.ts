@@ -62,6 +62,7 @@ export interface ChatSession {
   id: string;
   name: string;
   llms: SessionLLM[];
+  moderator?: SessionLLM; // Oturumun moderatörü
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
@@ -85,8 +86,9 @@ export interface BackendLLMConfig {
 
 export interface BackendChatRequest {
   message: string;
-  history: { role: MessageRole; content: string }[];
+  history: { role: MessageRole; content: string; name?: string }[];
   llms: BackendLLMConfig[];
+  moderator?: BackendLLMConfig; // Backend'e giden moderatör bilgisi
 }
 
 export interface BackendLLMResponse {

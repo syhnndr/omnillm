@@ -184,7 +184,7 @@ async function callCohere(
 /**
  * Dispatch a single LLM call based on provider.
  */
-async function callSingleLLM(
+export async function callSingleLLM(
   config: LLMConfig,
   message: string,
   history: ChatMessage[]
@@ -236,32 +236,40 @@ async function callSingleLLM(
   }
 }
 
+const MASTER_MODERATOR_PROMPT = `
+You are the Moderator of an LLM Council. Your role is to:
+1. Orchestrate the discussion between multiple specialized AI agents.
+2. Review their individual insights and identify points of consensus or disagreement.
+3. Synthesize a final, unified response for the user that combines the best parts of the experts' advice.
+4. If there's a conflict between experts, use your judgment to decide the most robust path forward.
+
+Be concise, professional, and act as the final decision-maker. Refrain from just repeating what others said; instead, provide a synthesized conclusion based on the expert discussion.
+`;
+
+export const SEQUENCE_DECIDER_PROMPT = `
+You are the Orchestrator of an LLM Council. 
+Given a USER QUESTION and a list of EXPERTS, decide the most logical ORDER for them to speak.
+Order them so that the most fundamental or broad expertise comes first, followed by more specific or dependent expertise.
+
+Respond ONLY with a comma-separated list of the experts' IDs in the chosen order. 
+Example Output: id_1,id_2,id_3
+`;
+
+export const EXPERT_LANE_DIRECTIVE = `
+ADVISORY: Listen to the previous experts in this council. If their insights overlap with your expertise or affect your commentary, acknowledge and build upon them. However, CRITICAL: stay strictly within your own area of expertise. Do not attempt to answer parts of the question that belong to other roles.
+`;
+
 /**
- * Call all LLMs in parallel using Promise.allSettled so that one failure
- * does not prevent other LLMs from responding.
+ * Call all LLMs sequentially so they can see each other's responses.
+ * If a moderator is provided, it acts as both the sequencer and the final synthesizer.
  */
 export async function callAllLLMs(
   message: string,
   history: ChatMessage[],
-  llms: LLMConfig[]
-): Promise<LLMResponse[]> {
-  const results = await Promise.allSettled(
-    llms.map((llm) => callSingleLLM(llm, message, history))
-  );
-
-  return results.map((result, index) => {
-    if (result.status === 'fulfilled') {
-      return result.value;
-    }
-    // Should not normally reach here because callSingleLLM catches all errors,
-    // but handle it defensively.
-    return {
-      savedLLMId: llms[index].savedLLMId,
-      displayName: llms[index].displayName,
-      role: llms[index].role,
-      content: '',
-      provider: llms[index].provider,
-      error: result.reason instanceof Error ? result.reason.message : 'Unknown error',
-    };
-  });
+  llms: LLMConfig[],
+  moderator?: LLMConfig
+): Promise<void> {
+  // This function is now mostly handled in the route for better streaming control,
+  // but let's update the logic here if it's ever used as a standalone helper.
+  // Actually, let's focus on the route implementation in chat.ts for real-time impact.
 }

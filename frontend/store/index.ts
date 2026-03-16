@@ -42,7 +42,7 @@ interface AppState {
   deleteLLM: (id: string) => void;
 
   // Session actions
-  createSession: (name: string, llms: SessionLLM[]) => ChatSession;
+  createSession: (name: string, llms: SessionLLM[], moderator?: SessionLLM) => ChatSession;
   deleteSession: (id: string) => void;
   addMessage: (sessionId: string, message: ChatMessage) => void;
   updateMessage: (sessionId: string, messageId: string, updates: Partial<ChatMessage>) => void;
@@ -78,7 +78,7 @@ export const useStore = create<AppState>()(
 
       // ── Session management ───────────────────────────────────────────────
 
-      createSession: (name, llms) => {
+      createSession: (name, llms, moderator) => {
         // Assign accent colours to LLMs
         const colouredLLMs: SessionLLM[] = llms.map((l, i) => ({
           ...l,
@@ -89,6 +89,7 @@ export const useStore = create<AppState>()(
           id: Date.now().toString(),
           name,
           llms: colouredLLMs,
+          moderator,
           messages: [],
           createdAt: Date.now(),
           updatedAt: Date.now(),

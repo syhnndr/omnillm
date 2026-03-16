@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   View,
   Text,
@@ -6,8 +5,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  SafeAreaView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store';
 import { ChatSession } from '../types';
@@ -70,7 +70,9 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <Stack.Screen options={{ title: 'OmniLLM', headerLargeTitle: false }} />
+      
       {sessions.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="chatbubbles-outline" size={64} color="#404040" />
@@ -81,6 +83,7 @@ export default function HomeScreen() {
         <FlatList
           data={sessions}
           keyExtractor={(item) => item.id}
+          style={{ flex: 1 }}
           renderItem={({ item }) => (
             <SessionCard
               session={item}
@@ -109,7 +112,7 @@ export default function HomeScreen() {
           <Text style={styles.fabLabel}>New Session</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -121,6 +124,7 @@ const styles = StyleSheet.create({
   list: {
     padding: 16,
     gap: 12,
+    paddingBottom: 100, // Extra space for FABs
   },
   card: {
     backgroundColor: '#1a1a1a',
@@ -185,11 +189,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   fabRow: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 12,
     padding: 20,
-    paddingBottom: 32,
+    paddingBottom: 40,
   },
   fab: {
     flexDirection: 'row',

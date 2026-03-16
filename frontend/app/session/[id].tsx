@@ -13,8 +13,19 @@ import {
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, retrieveApiKey } from '../../store';
-import { ChatMessage, ChatSession, BackendChatRequest, BackendChatResponse } from '../../types';
+import { ChatMessage, ChatSession, BackendChatRequest, BackendLLMResponse } from '../../types';
 import ChatMessageBubble from '../../components/ChatMessage';
+
+function sanitizeError(err: string): string {
+  if (!err) return 'Unknown error';
+  if (err.includes('<!DOCTYPE') || err.includes('<html')) {
+    return 'Provider Error: The AI service returned an invalid response (404/500). Please check your API config or credentials.';
+  }
+  if (err.length > 200) {
+    return err.substring(0, 200) + '...';
+  }
+  return err;
+}
 
 function buildHistory(session: ChatSession): { role: 'user' | 'assistant'; content: string }[] {
   const history: { role: 'user' | 'assistant'; content: string }[] = [];
@@ -40,6 +51,8 @@ export default function SessionScreen() {
   const session = sessions.find((s) => s.id === id);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [activeStatus, setActiveStatus] = useState<{ name: string; status: string; error?: string } | null>(null);
+  const [modError, setModError] = useState<{ type: 'key' | 'runtime'; message: string } | null>(null);
   const listRef = useRef<FlatList>(null);
 
   // Set screen title
@@ -62,6 +75,8 @@ export default function SessionScreen() {
     if (!text || sending || !session) return;
     setInput('');
     setSending(true);
+    // Start with sequencing
+    setActiveStatus({ name: 'Moderator', status: 'sequencing' });
 
     // Add user message
     const userMsgId = `msg_${Date.now()}_user`;
@@ -73,25 +88,6 @@ export default function SessionScreen() {
     };
     addMessage(id!, userMsg);
 
-    // Add loading placeholder for each LLM
-    const loadingIds: Record<string, string> = {};
-    session.llms.forEach((llm) => {
-      const msgId = `msg_${Date.now()}_${llm.savedLLMId}`;
-      loadingIds[llm.savedLLMId] = msgId;
-      const placeholder: ChatMessage = {
-        id: msgId,
-        role: 'assistant',
-        content: '',
-        llmDisplayName: llm.displayName,
-        llmProvider: llm.provider,
-        llmRole: llm.role,
-        llmColor: llm.color,
-        loading: true,
-        timestamp: Date.now(),
-      };
-      addMessage(id!, placeholder);
-    });
-
     // Scroll to bottom
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
 
@@ -99,13 +95,13 @@ export default function SessionScreen() {
     const history = buildHistory(session);
 
     try {
-      // Fetch API keys from SecureStore — inside try so missing keys are caught
+      setModError(null); // Reset moderator error state
+
+      // 1. Fetch Experts API Keys
       const llmConfigs = await Promise.all(
         session.llms.map(async (l) => {
           const apiKey = await retrieveApiKey(l.savedLLMId);
-          if (!apiKey) {
-            throw new Error(`No API key found for "${l.displayName}". Please add it in Settings.`);
-          }
+          if (!apiKey) throw new Error(`API Key missing for expert: ${l.displayName}`);
           return {
             savedLLMId: l.savedLLMId,
             provider: l.provider,
@@ -118,47 +114,140 @@ export default function SessionScreen() {
           };
         })
       );
+
+      // 2. Fetch Moderator API Key (CRITICAL: If session has a moderator, it MUST have a key)
+      let moderatorConfig = undefined;
+      if (session.moderator) {
+        const apiKey = await retrieveApiKey(session.moderator.savedLLMId);
+        if (!apiKey) {
+          const errorMsg = "Missing API Key for the Moderator. The Council cannot convene without its leader. Please check your API settings.";
+          setModError({ type: 'key', message: errorMsg });
+          
+          // Add a system bubble and STOP
+          addMessage(id!, {
+            id: `msg_err_${Date.now()}`,
+            role: 'assistant',
+            content: `🛑 ${errorMsg}`,
+            llmDisplayName: 'System',
+            llmColor: '#ef4444',
+            timestamp: Date.now(),
+          });
+          setSending(false);
+          setActiveStatus(null);
+          return; // STOP HERE
+        }
+        
+        moderatorConfig = {
+          savedLLMId: session.moderator.savedLLMId,
+          provider: session.moderator.provider,
+          model: session.moderator.model,
+          apiKey,
+          systemPrompt: session.moderator.systemPrompt,
+          role: session.moderator.role,
+          displayName: session.moderator.displayName,
+          ...(session.moderator.baseUrl ? { baseUrl: session.moderator.baseUrl } : {}),
+        };
+      }
+
       const requestBody: BackendChatRequest = {
         message: text,
         history,
         llms: llmConfigs,
+        moderator: moderatorConfig,
       };
 
-      const res = await fetch(`${backendUrl}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${backendUrl}/chat`);
+      xhr.setRequestHeader('Content-Type', 'application/json');
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      let lastProcessedLength = 0;
 
-      const data: BackendChatResponse = await res.json();
+      xhr.onreadystatechange = () => {
+        if (xhr.readyState === 3 || xhr.readyState === 4) {
+          const newText = xhr.responseText.substring(lastProcessedLength);
+          const lines = newText.split('\n');
+          
+          if (xhr.readyState === 3 && lines.length > 0) {
+             const lastLine = lines.pop();
+             lastProcessedLength += (newText.length - (lastLine?.length || 0));
+          } else {
+             lastProcessedLength = xhr.responseText.length;
+          }
 
-      // Update loading placeholders with actual responses
-      data.responses.forEach((resp) => {
-        const msgId = loadingIds[resp.savedLLMId];
-        if (!msgId) return;
-        updateMessage(id!, msgId, {
-          content: resp.error ? `Error: ${resp.error}` : resp.content,
-          loading: false,
-          error: resp.error,
-        });
-      });
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line);
+              
+              if (data.type === 'status') {
+                setActiveStatus({ name: data.name, status: data.status });
+              } else {
+                setActiveStatus(null);
+                
+                const cleanError = data.error ? sanitizeError(data.error) : null;
+
+                // FATAL MODERATOR ERROR: If the orchestrator fails at any point, stop EVERYTHING immediately.
+                if (data.role === 'Moderator' && data.error) {
+                  xhr.abort(); // KILL THE STREAM IMMEDIATELY
+                  
+                  const cleanDetails = sanitizeError(data.error);
+                  setModError({ type: 'runtime', message: cleanDetails });
+                  
+                  // Add a single, clean system bubble explaining the failure. NO TECHNICAL LOGS in the bubble.
+                  const errorMsgId = `msg_err_${Date.now()}`;
+                  addMessage(id!, {
+                    id: errorMsgId,
+                    role: 'assistant',
+                    content: `🛑 Council Assembly Blocked\n\nThe Moderator (Orchestrator) is encountering an issue and cannot lead the council. Please check your API/Model settings in the top banner.`,
+                    llmDisplayName: 'System',
+                    llmRole: 'Moderator',
+                    llmColor: '#ef4444',
+                    timestamp: Date.now(),
+                  });
+
+                  setSending(false);
+                  setActiveStatus(null);
+                  return; // EXIT - DO NOT process any more lines or experts
+                }
+
+                const msgId = `msg_${Date.now()}_${data.savedLLMId}`;
+                const participant = session.llms.find(l => l.savedLLMId === data.savedLLMId) 
+                  || (session.moderator?.savedLLMId === data.savedLLMId ? session.moderator : null);
+
+                const newMsg: ChatMessage = {
+                  id: msgId,
+                  role: 'assistant',
+                  content: cleanError ? `Error Details: ${cleanError}` : data.content,
+                  llmDisplayName: data.displayName,
+                  llmProvider: data.provider as any,
+                  llmRole: data.role,
+                  llmColor: participant?.color,
+                  loading: false,
+                  error: data.error,
+                  timestamp: Date.now(),
+                };
+                addMessage(id!, newMsg);
+              }
+              setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+            } catch (e) { }
+          }
+        }
+
+        if (xhr.readyState === 4) {
+          setSending(false);
+          setActiveStatus(null);
+        }
+      };
+
+      xhr.onerror = () => {
+        setSending(false);
+        setActiveStatus(null);
+      };
+
+      xhr.send(JSON.stringify(requestBody));
     } catch (err) {
-      // Mark all loading messages as errored
-      session.llms.forEach((llm) => {
-        const msgId = loadingIds[llm.savedLLMId];
-        updateMessage(id!, msgId, {
-          content: `Error: ${err instanceof Error ? err.message : 'Network error'}`,
-          loading: false,
-          error: err instanceof Error ? err.message : 'Network error',
-        });
-      });
-    } finally {
+      console.error('handleSend prepare error:', err);
       setSending(false);
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 200);
     }
   }
 
@@ -170,33 +259,49 @@ export default function SessionScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      {/* LLM participant bar */}
-      <View style={styles.participantBar}>
-        {session.llms.map((llm) => (
-          <View key={llm.savedLLMId} style={styles.participantChip}>
-            <View style={[styles.participantDot, { backgroundColor: llm.color }]} />
-            <Text style={styles.participantLabel} numberOfLines={1}>
-              {llm.displayName}
-              {llm.role ? ` · ${llm.role}` : ''}
-            </Text>
-          </View>
-        ))}
-      </View>
-
-      {/* Messages */}
+      {modError && (
+        <View style={[
+          styles.warningBanner, 
+          modError.type === 'runtime' && { backgroundColor: '#450a0a', borderColor: '#ef4444' }
+        ]}>
+          <Ionicons 
+            name={modError.type === 'runtime' ? "flash" : "warning"} 
+            size={16} 
+            color={modError.type === 'runtime' ? "#ef4444" : "#f59e0b"} 
+          />
+          <Text style={[styles.warningText, modError.type === 'runtime' && { color: '#ef4444' }]}>
+            {modError.message}
+          </Text>
+        </View>
+      )}
       <FlatList
         ref={listRef}
         data={messages}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <ChatMessageBubble message={item} />}
         contentContainerStyle={styles.messageList}
+        ListFooterComponent={
+          activeStatus ? (
+            <View style={styles.thinkingContainer}>
+              <ActivityIndicator size="small" color="#10a37f" />
+              <Text style={styles.thinkingText}>
+                {activeStatus.name}{' '}
+                {activeStatus.status === 'synthesizing'
+                  ? 'is synthesizing result...'
+                  : activeStatus.status === 'sequencing'
+                  ? 'is deciding sequence...'
+                  : 'is thinking...'}
+              </Text>
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <View style={styles.emptyChat}>
             <Ionicons name="chatbubbles-outline" size={48} color="#262626" />
-            <Text style={styles.emptyChatText}>Send a message to all LLMs at once</Text>
+            <Text style={styles.emptyChatText}>Send a message to start the council debate</Text>
           </View>
         }
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
       />
 
       {/* Input */}
@@ -232,8 +337,44 @@ export default function SessionScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f0f' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f0f0f' },
   errorText: { color: '#ef4444', fontSize: 16 },
+  thinkingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#1a1a1a',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 15,
+    marginHorizontal: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#262626',
+    alignSelf: 'flex-start',
+  },
+  thinkingText: {
+    color: '#a3a3a3',
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#3b2a0a',
+    padding: 10,
+    marginHorizontal: 12,
+    marginTop: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  warningText: {
+    color: '#f59e0b',
+    fontSize: 12,
+    flex: 1,
+  },
   participantBar: {
     flexDirection: 'row',
     flexWrap: 'wrap',
