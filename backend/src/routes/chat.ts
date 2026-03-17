@@ -2,7 +2,8 @@ import { Router, Request, Response } from "express";
 import { 
   callSingleLLM, 
   SEQUENCE_DECIDER_PROMPT, 
-  EXPERT_LANE_DIRECTIVE 
+  EXPERT_LANE_DIRECTIVE,
+  MASTER_MODERATOR_PROMPT
 } from "../services/llm";
 
 const router = Router();
@@ -60,7 +61,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     // 1. Initial Sequencing (If Moderator exists)
     if (body.moderator) {
-      const expertListString = body.llms.map(l => `${l.displayName} (ID: ${l.savedLLMId})`).join(', ');
+      const expertListString = body.llms.map(l => `"${l.displayName}"`).join(', ');
       const sequenceConfig = {
         ...body.moderator,
         systemPrompt: `${SEQUENCE_DECIDER_PROMPT}\n\nExperts available: ${expertListString}`
@@ -74,17 +75,23 @@ router.post("/", async (req: Request, res: Response) => {
         }
 
         if (orderResponse.content) {
-          const orderedIds = orderResponse.content.split(',').map(s => s.trim().toLowerCase());
-          console.log(`[Sequencer] Moderator decided order: ${orderedIds.join(' -> ')}`);
-          
-          sortedLLMs.sort((a, b) => {
-            const indexA = orderedIds.indexOf(a.savedLLMId.toLowerCase());
-            const indexB = orderedIds.indexOf(b.savedLLMId.toLowerCase());
-            if (indexA === -1 && indexB === -1) return 0;
-            if (indexA === -1) return 1;
-            if (indexB === -1) return -1;
-            return indexA - indexB;
-          });
+          // Robust parsing: find each expert name's position in the response text.
+          // This handles comma-separated lists, numbered lists, arrows, prose, etc.
+          const responseText = orderResponse.content.toLowerCase();
+          const namePositions = body.llms.map(l => ({
+            llm: l,
+            position: responseText.indexOf(l.displayName.toLowerCase()),
+          }));
+
+          const foundNames = namePositions.filter(n => n.position !== -1);
+          if (foundNames.length > 0) {
+            foundNames.sort((a, b) => a.position - b.position);
+            const notFound = namePositions.filter(n => n.position === -1).map(n => n.llm);
+            sortedLLMs = [...foundNames.map(n => n.llm), ...notFound];
+            console.log(`[Sequencer] Moderator decided order: ${sortedLLMs.map(l => l.displayName).join(' -> ')}`);
+          } else {
+            console.log(`[Sequencer] Could not parse order from response, using default order.`);
+          }
         }
       } catch (seqError) {
         const errorMsg = seqError instanceof Error ? seqError.message : "Sequencing failed";
@@ -100,11 +107,16 @@ router.post("/", async (req: Request, res: Response) => {
       }
     }
 
-    const history: ChatMessage[] = [...(body.history || [])];
+    const baseHistory: ChatMessage[] = [...(body.history || [])];
+    const roundResponses: ChatMessage[] = [];
 
     // 2. Process Experts in sorted order
     for (const llmConfig of sortedLLMs) {
-      const contextualHistory: ChatMessage[] = history.map((msg) => ({
+      // Build history: base + previous experts' responses
+      // The user message is NOT added here — each provider function appends it automatically
+      const fullHistory: ChatMessage[] = [...baseHistory, ...roundResponses];
+
+      const contextualHistory: ChatMessage[] = fullHistory.map((msg) => ({
         role: msg.role,
         content: msg.name ? `[${msg.name}]: ${msg.content}` : msg.content,
       }));
@@ -124,9 +136,16 @@ router.post("/", async (req: Request, res: Response) => {
       res.write(JSON.stringify(response) + "\n");
 
       if (!response.error && response.content) {
-        history.push({
+        roundResponses.push({
           role: "assistant",
           content: response.content,
+          name: llmConfig.displayName || llmConfig.role,
+        });
+      } else if (response.error) {
+        // Notify subsequent experts and moderator about the failure
+        roundResponses.push({
+          role: "assistant",
+          content: `[${llmConfig.displayName || llmConfig.role} was unable to respond: ${response.error}]`,
           name: llmConfig.displayName || llmConfig.role,
         });
       }
@@ -134,7 +153,12 @@ router.post("/", async (req: Request, res: Response) => {
 
     // 3. Process Moderator (Final Synthesis)
     if (body.moderator) {
-      const contextualHistory: ChatMessage[] = history.map((msg) => ({
+      // User message is NOT added here — callSingleLLM appends it automatically
+      const modHistory: ChatMessage[] = [
+        ...baseHistory,
+        ...roundResponses,
+      ];
+      const contextualHistory: ChatMessage[] = modHistory.map((msg) => ({
         role: msg.role,
         content: msg.name ? `[${msg.name}]: ${msg.content}` : msg.content,
       }));
@@ -144,7 +168,7 @@ router.post("/", async (req: Request, res: Response) => {
 
       const moderatorConfig = {
         ...body.moderator,
-        systemPrompt: `You are the Moderator of an LLM Council.\n1. Review specialized insights.\n2. Synthesize a unified response.\n3. Be decisive.\n\nUser Profile: ${body.moderator.systemPrompt}`,
+        systemPrompt: `${MASTER_MODERATOR_PROMPT}\n\nUser Profile: ${body.moderator.systemPrompt}`,
       };
 
       const modResponse = await callSingleLLM(moderatorConfig, body.message, contextualHistory);

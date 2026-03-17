@@ -27,14 +27,14 @@ function sanitizeError(err: string): string {
   return err;
 }
 
-function buildHistory(session: ChatSession): { role: 'user' | 'assistant'; content: string }[] {
-  const history: { role: 'user' | 'assistant'; content: string }[] = [];
+function buildHistory(session: ChatSession): { role: 'user' | 'assistant'; content: string; name?: string }[] {
+  const history: { role: 'user' | 'assistant'; content: string; name?: string }[] = [];
   for (const msg of session.messages) {
     // Include user messages and fully resolved assistant messages (skip loading/errored ones)
     if (msg.role === 'user') {
       history.push({ role: 'user', content: msg.content });
     } else if (msg.role === 'assistant' && !msg.loading && !msg.error && msg.content) {
-      history.push({ role: 'assistant', content: msg.content });
+      history.push({ role: 'assistant', content: msg.content, name: msg.llmDisplayName });
     }
   }
   return history;

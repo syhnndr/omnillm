@@ -59,9 +59,15 @@ async function callAnthropic(
 
   const messages: Anthropic.MessageParam[] = [];
 
-  // Add conversation history
+  // Merge consecutive same-role messages to satisfy Anthropic's strict alternation
+  // requirement without injecting artificial bridging messages (e.g. "Continue.")
   for (const h of history) {
-    messages.push({ role: h.role, content: h.content });
+    const last = messages[messages.length - 1];
+    if (last && last.role === h.role) {
+      last.content = (last.content as string) + '\n\n' + h.content;
+    } else {
+      messages.push({ role: h.role, content: h.content });
+    }
   }
 
   messages.push({ role: 'user', content: message });
@@ -101,11 +107,16 @@ async function callGemini(
     geminiHistory.push({ role: 'model', parts: [{ text: 'Understood.' }] });
   }
 
+  // Merge consecutive same-role messages to satisfy Gemini's alternating
+  // user/model turn requirement without injecting artificial bridging messages
   for (const h of history) {
-    geminiHistory.push({
-      role: h.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: h.content }],
-    });
+    const role = h.role === 'assistant' ? 'model' : 'user';
+    const last = geminiHistory[geminiHistory.length - 1];
+    if (last && last.role === role) {
+      last.parts.push({ text: h.content });
+    } else {
+      geminiHistory.push({ role, parts: [{ text: h.content }] });
+    }
   }
 
   const chat = model.startChat({ history: geminiHistory });
@@ -236,7 +247,7 @@ export async function callSingleLLM(
   }
 }
 
-const MASTER_MODERATOR_PROMPT = `
+export const MASTER_MODERATOR_PROMPT = `
 You are the Moderator of an LLM Council. Your role is to:
 1. Orchestrate the discussion between multiple specialized AI agents.
 2. Review their individual insights and identify points of consensus or disagreement.
@@ -251,25 +262,12 @@ You are the Orchestrator of an LLM Council.
 Given a USER QUESTION and a list of EXPERTS, decide the most logical ORDER for them to speak.
 Order them so that the most fundamental or broad expertise comes first, followed by more specific or dependent expertise.
 
-Respond ONLY with a comma-separated list of the experts' IDs in the chosen order. 
-Example Output: id_1,id_2,id_3
+Respond ONLY with a comma-separated list of the experts' display names in the chosen order.
+Example Output: Expert A,Expert B,Expert C
 `;
 
 export const EXPERT_LANE_DIRECTIVE = `
 ADVISORY: Listen to the previous experts in this council. If their insights overlap with your expertise or affect your commentary, acknowledge and build upon them. However, CRITICAL: stay strictly within your own area of expertise. Do not attempt to answer parts of the question that belong to other roles.
 `;
 
-/**
- * Call all LLMs sequentially so they can see each other's responses.
- * If a moderator is provided, it acts as both the sequencer and the final synthesizer.
- */
-export async function callAllLLMs(
-  message: string,
-  history: ChatMessage[],
-  llms: LLMConfig[],
-  moderator?: LLMConfig
-): Promise<void> {
-  // This function is now mostly handled in the route for better streaming control,
-  // but let's update the logic here if it's ever used as a standalone helper.
-  // Actually, let's focus on the route implementation in chat.ts for real-time impact.
-}
+
