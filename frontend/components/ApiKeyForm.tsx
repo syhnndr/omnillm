@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { LLMProvider, SavedLLM } from '../types';
 import { PROVIDERS, getProviderInfo } from '../constants/providers';
@@ -54,6 +55,21 @@ export default function ApiKeyForm(props: Props) {
 function BackendUrlForm({ currentUrl, onSaveUrl }: BackendUrlProps) {
   const [url, setUrl] = useState(currentUrl);
 
+  function handleSaveUrl() {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      Alert.alert('Validation Error', 'Backend URL cannot be empty.');
+      return;
+    }
+    try {
+      new URL(trimmed);
+    } catch {
+      Alert.alert('Validation Error', 'Please enter a valid URL (e.g. http://localhost:3001).');
+      return;
+    }
+    onSaveUrl(trimmed);
+  }
+
   return (
     <View style={styles.row}>
       <TextInput
@@ -66,7 +82,7 @@ function BackendUrlForm({ currentUrl, onSaveUrl }: BackendUrlProps) {
         autoCorrect={false}
         keyboardType="url"
       />
-      <TouchableOpacity style={styles.saveBtn} onPress={() => onSaveUrl(url.trim())}>
+      <TouchableOpacity style={styles.saveBtn} onPress={handleSaveUrl}>
         <Text style={styles.saveBtnText}>Save</Text>
       </TouchableOpacity>
     </View>
@@ -87,6 +103,18 @@ function LLMAddForm({ editTarget, onSave, onCancel }: LLMFormProps) {
   const selectedProvider = getProviderInfo(provider);
 
   function handleSave() {
+    if (!displayName.trim()) {
+      Alert.alert('Validation Error', 'Display name is required.');
+      return;
+    }
+    if (!model.trim()) {
+      Alert.alert('Validation Error', 'Model name is required.');
+      return;
+    }
+    if (!editTarget && !apiKey.trim()) {
+      Alert.alert('Validation Error', 'API key is required.');
+      return;
+    }
     onSave({ displayName: displayName.trim(), provider, model: model.trim(), apiKey: apiKey.trim(), baseUrl: baseUrl.trim() || undefined });
   }
 

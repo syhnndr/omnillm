@@ -77,6 +77,10 @@ export default function NewSessionScreen() {
       Alert.alert('Error', 'Please select a Moderator to lead the council');
       return;
     }
+    if (selectedIds.includes(moderatorId)) {
+      Alert.alert('Error', 'The Moderator cannot also be an Expert in the same session. Please choose a different model for one of the roles.');
+      return;
+    }
 
     const sessionLLMs: SessionLLM[] = selectedIds.map((id, index) => {
         const saved = savedLLMs.find((l) => l.id === id)!;

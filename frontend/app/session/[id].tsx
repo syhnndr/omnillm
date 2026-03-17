@@ -13,7 +13,7 @@ import {
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, retrieveApiKey } from '../../store';
-import { ChatMessage, ChatSession, BackendChatRequest, BackendLLMResponse } from '../../types';
+import { ChatMessage, ChatSession, BackendChatRequest } from '../../types';
 import ChatMessageBubble from '../../components/ChatMessage';
 
 function sanitizeError(err: string): string {
@@ -33,8 +33,15 @@ function buildHistory(session: ChatSession): { role: 'user' | 'assistant'; conte
     // Include user messages and fully resolved assistant messages (skip loading/errored ones)
     if (msg.role === 'user') {
       history.push({ role: 'user', content: msg.content });
-    } else if (msg.role === 'assistant' && !msg.loading && !msg.error && msg.content) {
-      history.push({ role: 'assistant', content: msg.content, name: msg.llmDisplayName });
+    } else if (msg.role === 'assistant' && !msg.loading && msg.content) {
+      // Skip system-generated UI messages (timeout, network error, key errors) —
+      // they are not real expert responses and must not pollute the LLM context.
+      if (msg.llmDisplayName === 'System') continue;
+      // For errored messages, use [SYSTEM NOTE] format so LLMs don't misread it as real content.
+      const content = msg.error
+        ? `[SYSTEM NOTE: ${msg.llmDisplayName ?? 'An expert'} encountered an error and could not provide a response. Proceed without their input.]`
+        : msg.content;
+      history.push({ role: 'assistant', content, name: msg.llmDisplayName });
     }
   }
   return history;
@@ -45,7 +52,6 @@ export default function SessionScreen() {
   const navigation = useNavigation();
   const sessions = useStore((s) => s.sessions);
   const addMessage = useStore((s) => s.addMessage);
-  const updateMessage = useStore((s) => s.updateMessage);
   const backendUrl = useStore((s) => s.backendUrl);
 
   const session = sessions.find((s) => s.id === id);
@@ -159,6 +165,20 @@ export default function SessionScreen() {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${backendUrl}/chat`);
       xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.timeout = 120000; // 2 minutes — prevents infinite spinner on hanging provider requests
+
+      xhr.ontimeout = () => {
+        addMessage(id!, {
+          id: `msg_timeout_${Date.now()}`,
+          role: 'assistant',
+          content: '⏱ Request timed out. The server took too long to respond. Please try again.',
+          llmDisplayName: 'System',
+          llmColor: '#f59e0b',
+          timestamp: Date.now(),
+        });
+        setSending(false);
+        setActiveStatus(null);
+      };
 
       let lastProcessedLength = 0;
 
@@ -210,7 +230,7 @@ export default function SessionScreen() {
                   return; // EXIT - DO NOT process any more lines or experts
                 }
 
-                const msgId = `msg_${Date.now()}_${data.savedLLMId}`;
+                const msgId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${data.savedLLMId}`;
                 const participant = session.llms.find(l => l.savedLLMId === data.savedLLMId) 
                   || (session.moderator?.savedLLMId === data.savedLLMId ? session.moderator : null);
 
@@ -228,9 +248,9 @@ export default function SessionScreen() {
                 };
                 addMessage(id!, newMsg);
               }
-              setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
             } catch (e) { }
           }
+          setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
         }
 
         if (xhr.readyState === 4) {
@@ -240,6 +260,14 @@ export default function SessionScreen() {
       };
 
       xhr.onerror = () => {
+        addMessage(id!, {
+          id: `msg_neterr_${Date.now()}`,
+          role: 'assistant',
+          content: '🔌 Network error: Could not reach the backend. Please check your connection and backend URL in Settings.',
+          llmDisplayName: 'System',
+          llmColor: '#ef4444',
+          timestamp: Date.now(),
+        });
         setSending(false);
         setActiveStatus(null);
       };
@@ -247,6 +275,15 @@ export default function SessionScreen() {
       xhr.send(JSON.stringify(requestBody));
     } catch (err) {
       console.error('handleSend prepare error:', err);
+      const errMsg = err instanceof Error ? err.message : 'An unexpected error occurred.';
+      addMessage(id!, {
+        id: `msg_prepareerr_${Date.now()}`,
+        role: 'assistant',
+        content: `🛑 ${errMsg}`,
+        llmDisplayName: 'System',
+        llmColor: '#ef4444',
+        timestamp: Date.now(),
+      });
       setSending(false);
     }
   }

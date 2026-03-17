@@ -50,14 +50,10 @@ export const PROVIDERS: ProviderInfo[] = [
   },
 ];
 
-export const PROVIDER_COLORS: Record<LLMProvider, string> = {
-  openai: '#10a37f',
-  anthropic: '#d97757',
-  google: '#4285f4',
-  mistral: '#ff7000',
-  cohere: '#39594d',
-  custom: '#7c3aed',
-};
+/** Accent colours keyed by provider — derived from PROVIDERS to avoid duplication */
+export const PROVIDER_COLORS: Record<LLMProvider, string> = Object.fromEntries(
+  PROVIDERS.map((p) => [p.id, p.color])
+) as Record<LLMProvider, string>;
 
 /** Accent colours used to distinguish multiple LLMs within a session */
 export const LLM_ACCENT_COLORS = [

@@ -59,7 +59,16 @@ export default function SettingsScreen() {
   }
 
   function handleDelete(llm: SavedLLM) {
-    Alert.alert('Delete LLM', `Remove "${llm.displayName}"?`, [
+    const affectedSessions = useStore.getState().sessions.filter(
+      (s) =>
+        s.llms.some((l) => l.savedLLMId === llm.id) ||
+        s.moderator?.savedLLMId === llm.id
+    );
+    const warningLine =
+      affectedSessions.length > 0
+        ? `\n\n⚠️ This will break ${affectedSessions.length} existing session(s) that use this model.`
+        : '';
+    Alert.alert('Delete LLM', `Remove "${llm.displayName}"?${warningLine}`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',

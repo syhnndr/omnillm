@@ -79,16 +79,11 @@ export const useStore = create<AppState>()(
       // ── Session management ───────────────────────────────────────────────
 
       createSession: (name, llms, moderator) => {
-        // Assign accent colours to LLMs
-        const colouredLLMs: SessionLLM[] = llms.map((l, i) => ({
-          ...l,
-          color: LLM_ACCENT_COLORS[i % LLM_ACCENT_COLORS.length],
-        }));
-
+        // Colours are assigned by the caller (new-session.tsx). Preserve them as-is.
         const session: ChatSession = {
           id: Date.now().toString(),
           name,
-          llms: colouredLLMs,
+          llms,
           moderator,
           messages: [],
           createdAt: Date.now(),

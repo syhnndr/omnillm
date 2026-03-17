@@ -12,6 +12,14 @@ export interface LLMResponse {
   error?: string;
 }
 
+/** Token budget: moderator synthesises all expert responses so it needs more room. */
+const MODERATOR_MAX_TOKENS = 4096;
+const EXPERT_MAX_TOKENS = 2048;
+
+function maxTokensFor(config: LLMConfig): number {
+  return config.role === 'Moderator' ? MODERATOR_MAX_TOKENS : EXPERT_MAX_TOKENS;
+}
+
 /**
  * Call a single OpenAI-compatible model.
  */
@@ -41,7 +49,7 @@ async function callOpenAI(
   const completion = await client.chat.completions.create({
     model: config.model || 'gpt-4o',
     messages,
-    max_tokens: 2048,
+    max_tokens: maxTokensFor(config),
   });
 
   return completion.choices[0]?.message?.content ?? '';
@@ -74,7 +82,7 @@ async function callAnthropic(
 
   const response = await client.messages.create({
     model: config.model || 'claude-3-5-sonnet-20241022',
-    max_tokens: 2048,
+    max_tokens: maxTokensFor(config),
     system: config.systemPrompt || undefined,
     messages,
   });
@@ -152,7 +160,7 @@ async function callMistral(
   const completion = await client.chat.completions.create({
     model: config.model || 'mistral-large-latest',
     messages,
-    max_tokens: 2048,
+    max_tokens: maxTokensFor(config),
   });
 
   return completion.choices[0]?.message?.content ?? '';
@@ -186,7 +194,7 @@ async function callCohere(
   const completion = await client.chat.completions.create({
     model: config.model || 'command-r-plus',
     messages,
-    max_tokens: 2048,
+    max_tokens: maxTokensFor(config),
   });
 
   return completion.choices[0]?.message?.content ?? '';
